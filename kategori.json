@@ -1,0 +1,7 @@
+{
+  "Makan & Minum": ["indomilk", "ultra", "susu", "roti", "sari roti", "mie ", "indomie", "kopi", "teh", "aquaa", "air mineral", "le minerale", "snack", "biskuit", "chitato", "coklat", "silverqueen", "keju", "sarden", "abc", "kecap", "saos", "saus", "minyak goreng", "beras", "telur", "ayam", "nugget", "sosis", "bakso", "es krim", "campina", "frisian"],
+  "Pulsa & Token": ["pulsa", "token", "pln", "e-money", "flazz", "top up", "topup", "voucher data", "paket data"],
+  "Perawatan & Rumah": ["shampoo", "sampo", "sabun", "lifebuoy", "pepsodent", "odol", "pasta gigi", "deterjen", "rinso", "so klin", "sunlight", "kotex", "laurier", "tisu", "pampers", "sweety", "parfum", "skincare", "vaseline", "sunscreen"],
+  "Transportasi": ["bensin", "pertalite", "pertamax", "parkir", "e-toll", "etoll", "gojek", "grab", "maxim", "kereta", "krl", "transjakarta"],
+  "Tagihan": ["listrik", "pdam", "bpjs", "indihome", "wifi", "internet", "telkom"]
+}
