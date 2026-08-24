@@ -57,8 +57,10 @@ async function api(metode, jalur, bodyObj) {
   return j;
 }
 
-async function nilaiGet(range) {
-  const j = await api('GET', '/values/' + encodeURIComponent(range));
+async function nilaiGet(range, opts) {
+  let jalur = '/values/' + encodeURIComponent(range);
+  if (opts && opts.unformatted) jalur += '?valueRenderOption=UNFORMATTED_VALUE';
+  const j = await api('GET', jalur);
   return j.values || [];
 }
 
@@ -67,7 +69,7 @@ async function nilaiUpdate(range, values) {
 }
 
 async function nilaiAppend(range, values) {
-  return api('POST', '/values/' + encodeURIComponent(range) + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', { values });
+  return api('POST', '/values/' + encodeURIComponent(range) + ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', { values });
 }
 
 async function pastikanTab() {
@@ -88,13 +90,17 @@ async function pastikanTab() {
 }
 
 async function bacaSaldo() {
-  const v = await nilaiGet(TAB_SALDO + '!B1:B1');
+  // UNFORMATTED_VALUE: imun format lokal (locale Indonesia menulis 34592 sbg "34.592"
+  // yang kalau Number() langsung jadi desimal - sumber korupsi angka senyap).
+  const v = await nilaiGet(TAB_SALDO + '!B1:B1', { unformatted: true });
   const n = Number(v[0] && v[0][0]);
   return isFinite(n) ? n : 0;
 }
 
 async function tulisSaldo(v) {
-  await nilaiUpdate(TAB_SALDO + '!B1:B1', [[v]]);
+  const n = Math.round(Number(v));
+  if (!isFinite(n)) throw new Error('Saldo tidak valid (' + v + ') - tidak ditulis agar saldo lama aman.');
+  await nilaiUpdate(TAB_SALDO + '!B1:B1', [[n]]);
 }
 
 async function sudahAdaNoStruk(nostruk) {
@@ -107,28 +113,43 @@ async function sudahAdaNoStruk(nostruk) {
   return false;
 }
 
+// Normalisasi nominal: terima trx.nominal ATAU hasil parser field `total`.
+function angkaTrx(trx) {
+  const n = Math.round(Number(trx && (trx.nominal != null ? trx.nominal : trx.total)));
+  if (!isFinite(n) || n <= 0) {
+    throw new Error('Nominal transaksi tidak valid (' + (trx && (trx.nominal != null ? trx.nominal : trx.total)) + ') - baris TIDAK ditulis.');
+  }
+  return n;
+}
+
 async function catatTransaksi(trx) {
+  const nominal = angkaTrx(trx); // gagal cepat SEBELUM menyentuh sheet
   const saldoLama = await bacaSaldo();
-  const saldoBaru = saldoLama - trx.nominal;
+  const saldoBaru = saldoLama - nominal;
   await nilaiAppend(TAB_TRX + '!A1', [[
     trx.tanggal, trx.jam || '', trx.toko || '', trx.nostruk || '',
-    trx.item || '', trx.nominal, trx.kategori || 'Lainnya', saldoBaru
+    trx.item || '', nominal, trx.kategori || 'Lainnya', saldoBaru
   ]]);
   await tulisSaldo(saldoBaru);
   return saldoBaru;
 }
 
 async function undoTerakhir() {
-  const semua = await nilaiGet(TAB_TRX + '!A2:H');
+  const semua = await nilaiGet(TAB_TRX + '!A2:H', { unformatted: true });
   if (!semua.length) return null;
   const terakhir = semua[semua.length - 1];
   const nomor = semua.length + 1; // nomor baris sheet asli
-  const nominal = Math.abs(Number(terakhir[5]) || 0);
-  if (!nominal) return null;
-  const saldoBaru = (await bacaSaldo()) + nominal;
+  const nominal = Math.abs(Math.round(Number(terakhir[5])) || 0);
+  let saldoBaru = await bacaSaldo();
+  let catatan = '';
+  if (nominal > 0) {
+    saldoBaru = saldoBaru + nominal;
+    await tulisSaldo(saldoBaru);
+  } else {
+    catatan = ' (baris tanpa nominal - saldo tetap)';
+  }
   await api('POST', '/values/' + encodeURIComponent(TAB_TRX + '!A' + nomor + ':H' + nomor) + ':clear');
-  await tulisSaldo(saldoBaru);
-  return { toko: terakhir[2] || '', nominal, saldoBaru };
+  return { toko: terakhir[2] || '', nominal, saldoBaru, catatan };
 }
 
 async function setSaldo(v) {
@@ -140,12 +161,32 @@ async function getSisa() {
 }
 
 async function ambilSemuaTransaksi() {
-  const v = await nilaiGet(TAB_TRX + '!A2:H');
+  const v = await nilaiGet(TAB_TRX + '!A2:H', { unformatted: true });
   return v;
+}
+
+// Hapus baris fisik di tab Transaksi (baris 2 = data pertama).
+async function hapusBaris(nomorAwal, jumlah) {
+  const meta = await api('GET', '?fields=sheets.properties');
+  const tab = (meta.sheets || []).find(function (s) { return s.properties.title === TAB_TRX; });
+  if (!tab) throw new Error('Tab Transaksi tidak ditemukan');
+  await api('POST', ':batchUpdate', {
+    requests: [{
+      deleteDimension: {
+        range: {
+          sheetId: tab.properties.sheetId,
+          dimension: 'ROWS',
+          startIndex: nomorAwal - 1,
+          endIndex: nomorAwal - 1 + (jumlah || 1)
+        }
+      }
+    }]
+  });
 }
 
 module.exports = {
   pastikanTab, bacaSaldo, tulisSaldo, sudahAdaNoStruk, catatTransaksi,
-  undoTerakhir, setSaldo, getSisa, ambilSemuaTransaksi,
+  undoTerakhir, setSaldo, getSisa, ambilSemuaTransaksi, hapusBaris, angkaTrx,
+  nilaiGet, nilaiUpdate,
   TAB_TRX, TAB_SALDO, TAB_REKAP, HEADER
 };

@@ -4,3 +4,6 @@ node_modules/
 .env
 service-account.json
 *.log
+.baileys_auth/
+wa-qr.png
+ind.traineddata

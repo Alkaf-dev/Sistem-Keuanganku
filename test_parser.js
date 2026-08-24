@@ -75,6 +75,111 @@ cek('toko Alfamart', h3 && h3.toko === 'Alfamart', h3 && h3.toko);
 cek('tanpa TOTAL -> null', P.parseStrukText('INDOMARET\nAQUA 3.500\nTUNAI 5.000') === null, '');
 cek('teks kosong -> null', P.parseStrukText('') === null, '');
 
+// ---------- cariToko: merek berjarak & konteks aplikasi ----------
+cek('cariToko huruf berjarak (logo OCR)', P.cariToko(['A L FA MART', 'Jl. Sudirman No.1'], '') === 'Alfamart',
+  P.cariToko(['A L FA MART', 'Jl. Sudirman No.1'], ''));
+cek('cariToko alfagift -> Alfamart', P.cariToko(['ALFAGIFT - Pesanan #123', 'Jakarta'], '') === 'Alfamart',
+  P.cariToko(['ALFAGIFT - Pesanan #123', 'Jakarta'], ''));
+
+// Struk pengiriman online TANPA kata merek (hanya logo): toko tidak boleh baris kirim.
+const STRUK_KIRIM = [
+  'Pesanan #AGF-20260823-00123',
+  'Delivered at Blok C No 8 ISouthlake Resi, Rumpin',
+  '',
+  'Susu UHT 1L                    18.500',
+  'Roti Tawar                     14.000',
+  'Telur Ayam 1kg                 28.000',
+  'Total                          60.500',
+  'Metode Pembayaran : QRIS'
+].join('\n');
+const hk = P.parseStrukText(STRUK_KIRIM);
+cek('struk kirim: total 60500', hk && hk.total === 60500, hk && JSON.stringify(hk));
+cek('struk kirim: toko bukan baris kirim', hk && !/delivered|blok|resi/i.test(hk.toko), hk && hk.toko);
+cek('struk kirim: item bebas baris kirim', hk && !/delivered|blok|resi/i.test(hk.item), hk && hk.item);
+cek('struk kirim: item memuat susu & roti', hk && /susu/i.test(hk.item) && /roti/i.test(hk.item), hk && hk.item);
+
+// ---------- parsePerintahBayar ----------
+const b1 = P.parsePerintahBayar(['75000', 'alfamart', 'belanja', 'mingguan']);
+cek('bayar toko+ket', b1 && b1.nominal === 75000 && b1.toko === 'Alfamart' && b1.item === 'belanja mingguan', JSON.stringify(b1));
+const b2 = P.parsePerintahBayar(['120.000', 'Indomaret']);
+cek('bayar titik ribuan + kapital', b2 && b2.nominal === 120000 && b2.toko === 'Indomaret' && b2.item === 'Pengeluaran manual', JSON.stringify(b2));
+const b3 = P.parsePerintahBayar(['5000']);
+cek('bayar tanpa toko', b3 && b3.nominal === 5000 && b3.toko === '' && b3.item === 'Pengeluaran manual', JSON.stringify(b3));
+const b4 = P.parsePerintahBayar(['abc']);
+cek('bayar nominal rusak -> null', b4 === null, JSON.stringify(b4));
+const b5 = P.parsePerintahBayar(['25000', 'kopi', 'sachet']);
+cek('bayar ket di posisi toko tetap ket', b5 && b5.toko === '' && b5.item === 'kopi sachet', JSON.stringify(b5));
+
+// ---------- filter alamat: toko tak boleh potongan alamat ----------
+const BARIS_ALAMATNYA = [
+  'po',
+  'Delivered at : Alkaf',
+  'CIVErea 3 Blok C No 8 (Southlake Residence No.C5/11',
+  'Rumpin, Kabupaten Bogor, Jawa Barat 16350, Indonesia',
+  'Maks Kirim : Minggu, 23 Agustus 2026',
+  'Status Order : Selesai',
+  'CICANGKAL RUMPIN',
+  '081294654121'
+];
+const tokoA = P.cariToko(BARIS_ALAMATNYA, '');
+cek('cariToko layar kirim -> Tidak dikenal', tokoA === 'Tidak dikenal', tokoA);
+
+// ---------- angkaTrx: normalisasi & penolakan nominal rusak ----------
+const S = require('./sheets');
+cek('angkaTrx dari field total', (() => { try { return S.angkaTrx({ total: 34592 }) === 34592; } catch (e) { return false; } })(), '');
+cek('angkaTrx dari field nominal', (() => { try { return S.angkaTrx({ nominal: 75000 }) === 75000; } catch (e) { return false; } })(), '');
+cek('angkaTrx terima angka polos ber-string', (() => { try { return S.angkaTrx({ nominal: '34592' }) === 34592; } catch (e) { return false; } })(), '');
+cek('angkaTrx tolak format locale ambigu', (() => { let ok = false; try { S.angkaTrx({ nominal: 'Rp75.000' }); } catch (e) { ok = true; } return ok; })(), '');
+cek('angkaTrx tolak kosong', (() => { let ok = false; try { S.angkaTrx({ nominal: '' }); } catch (e) { ok = true; } return ok; })(), '');
+cek('angkaTrx tolak nol/negatif', (() => { let ok = false; try { S.angkaTrx({ total: 0 }); } catch (e) { ok = true; } return ok; })(), '');
+
+// ---------- struk alfagift ASLI (hasil OCR psm6 dari screenshot pengguna) ----------
+const STRUK_ALFAGIFT_ASLI = [
+  'po',
+  '——"',
+  'Delivered at :                                                                                                   Alkaf',
+  'CIVErea 3                        Blok C No 8 (Southlake Residence No.C5/11, Mekar Sari, Kec.',
+  'Rumpin, Kabupaten Bogor, Jawa Barat 16350, Indonesial',
+  'Maks Kirim :                                                                   Minggu, 23 Agustus 2026',
+  '07:00 - 22:00',
+  'Status Order :                                                                                         Selesai',
+  'CICANGKAL RUMPIN',
+  '081294654121',
+  'SUKAMULYA, RUMPIN',
+  'Lenanananananananun.. SE SURADITANO. 6ORT OO2RW',
+  'Ref. $-260823-AGXBFHL',
+  'SGM Eksplor 1t IronC Susu',
+  'Bubuk Pertumbuhan Anak Madu                                               1           16,600           16,600',
+  '150 g',
+  'Disc. -1,100',
+  '7 omie Mi Instan Soto Mie 70                                         9          3.200          6,400',
+  'Disc. -200',
+  'Sedaap Mi Instan Goreng',
+  'Selection Korean Ayam Pedas 87                                      1           3,200           3,200',
+  'g',
+  'Disc. -100',
+  '5Days Roti Croissant Isi Fla',
+  'Cokelat Pisang 60 g                                                      1           71,300          7,300',
+  'Disc. -1,000',
+  'MyRoti Roti Sandwich Cokelat                                          1           4,500           4,500',
+  '46 g',
+  'Subtotal                                                                          6                            38,000',
+  'Total Diskon                                                                                        -2,400',
+  'A-Poin                                                                                                           -1,008',
+  'Biaya Pengiriman                                                                                             0',
+  'Total                                                                                                            34,592',
+  '“Harga yang tertera sudah termasuk PPN',
+  'Tgl. 08-23-2026 17:41:04',
+  'Kritik & Saran: 1500959',
+  'Email: alfacare@sat.co.id'
+].join('\n');
+const ha = P.parseStrukText(STRUK_ALFAGIFT_ASLI);
+cek('alfagift asli: toko Alfamart via alfacare/A-Poin', ha && ha.toko === 'Alfamart', ha && ha.toko);
+cek('alfagift asli: total 34592', ha && ha.total === 34592, ha && ha.total);
+cek('alfagift asli: tanggal 2026-08-23 + jam', ha && ha.tanggal === '2026-08-23' && ha.jam === '17:41', ha && (ha.tanggal + ' ' + ha.jam));
+cek('alfagift asli: item memuat produk nyata', ha && /sedaap|sgm|roti/i.test(ha.item), ha && ha.item);
+cek('alfagift asli: item bebas sampah alamat', ha && !/suraditano|cicangkal|sukamulya/i.test(ha.item), ha && ha.item);
+
 // e-receipt hasil htmlKeTeks bisa diparse
 const h4 = P.parseStrukText(P.htmlKeTeks('<div>No Struk: INDOG5551234567</div><div>INDOMILK SUSU 4.500</div><div>TOTAL 4.500</div><div>TUNAI 5.000 KEMBALI 500</div>'));
 cek('e-receipt html -> total 4500', h4 && h4.total === 4500, h4 && JSON.stringify(h4));
